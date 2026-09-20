@@ -25,6 +25,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	laya "github.com/lengoman/laya-go"
@@ -142,10 +143,11 @@ func runtimeFor(cfg config) ([]laya.Option, string) {
 
 // serverURL is the server to ask, or empty to run a sidecar instead.
 func serverURL(cfg config) string {
-	if cfg.url != "" {
-		return cfg.url
+	url := cfg.url
+	if url == "" {
+		url = os.Getenv(laya.ServerURLEnv)
 	}
-	return os.Getenv(laya.ServerURLEnv)
+	return strings.TrimRight(url, "/")
 }
 
 func hint(cfg config, err error) {
