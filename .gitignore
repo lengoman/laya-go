@@ -1,0 +1,23 @@
+# Build output
+/bin/
+*.test
+*.out
+
+# Local environment
+.env
+.envrc
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Local model and embedding caches
+.fastembed_cache/
+.cache/
+
+# Editors
+.DS_Store
+.vscode/
+*.iml

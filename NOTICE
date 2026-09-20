@@ -1,0 +1,19 @@
+laya-go
+Copyright 2026 Ivan Arambula
+
+This product includes software derived from the Laya project
+(https://github.com/NandhaKishorM/laya), Copyright Nandakishor M,
+licensed under the Apache License, Version 2.0.
+
+Specifically:
+
+  * route.go is a Go port of laya/lang.py and laya/router.py: the Unicode
+    script ranges, the function-word lists, the language heuristic, the
+    checkpoint names and aliases, the typed-decisions workflow signatures, and
+    the wording of the routing reasons.
+  * presets.go is a Go port of laya/presets.py: the question batteries for
+    triage, email, guard, moderation and model routing.
+  * python/bridge.py and python/server.py drive the laya package's own Router
+    and Agent APIs.
+
+That project is not affiliated with or endorsing this one.
