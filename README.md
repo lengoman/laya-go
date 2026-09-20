@@ -285,12 +285,21 @@ if errors.As(err, &bridgeErr) {
 
 ## Examples
 
-Two runnable programs live in `examples/`. Both need Go 1.26 or newer and a Python
-interpreter with laya on it.
+Two runnable programs live in `examples/`. Both need Go 1.26 or newer and a Laya runtime to
+ask, and both take a `-url`, so a runtime that is already up — a GPU box, a container, a
+server you started earlier — is all either of them needs:
 
-Put that interpreter in a virtualenv. Homebrew and system Pythons are marked
-`EXTERNALLY-MANAGED`, so a bare `pip install laya` there fails, and PyTorch lags the newest
-Python release by a few months — pick 3.12 or 3.13 if your `python3` is newer than that.
+```bash
+go run ./examples/triage -url http://gpu-box:8600
+go run ./examples/guard -url http://gpu-box:8600
+```
+
+Both read `$LAYA_URL` too, so exporting it once covers every command below.
+
+To host the runtime yourself instead, you need a Python interpreter with laya on it, and it
+should be a virtualenv: Homebrew and system Pythons are marked `EXTERNALLY-MANAGED`, so a
+bare `pip install laya` there fails, and PyTorch lags the newest Python release by a few
+months — pick 3.12 or 3.13 if your `python3` is newer than that.
 
 ```bash
 git clone https://github.com/lengoman/laya-go
@@ -311,41 +320,48 @@ uv pip install laya
 export LAYA_PYTHON="$PWD/.venv/bin/python3"
 ```
 
-`LAYA_PYTHON` is what a sidecar runs when `Sidecar.Python` is empty, which is how the
-examples find the virtualenv without a flag. Set it in your shell, or prefix each command
-with it. `.venv/` is already gitignored.
+`LAYA_PYTHON` is what a sidecar runs when `Sidecar.Python` is empty, which is how
+`examples/triage` finds the virtualenv without a flag. Set it in your shell, or prefix each
+command with it. `.venv/` is already gitignored.
 
-The first run of either example also downloads a checkpoint from Hugging Face — 421M
-parameters, a minute or two on a good connection — and caches it in `~/.cache/huggingface`.
-Runs after that spend a few seconds building the model and tens of milliseconds answering.
+The first run against a runtime you host also downloads a checkpoint from Hugging Face —
+421M parameters, a minute or two on a good connection — and caches it in
+`~/.cache/huggingface`. Runs after that spend a few seconds building the model and tens of
+milliseconds answering.
 
-### Triage one ticket, no server
+### Triage one ticket
 
-`examples/triage` starts its own Python interpreter, so there is nothing to run first.
+`examples/triage` handles a single ticket, from either runtime. Given no `-url` and no
+`$LAYA_URL` it starts a Python interpreter of its own, so there is nothing to run first.
 
 ```bash
 go run ./examples/triage
 go run ./examples/triage -message "I was billed twice, refund it or we cancel"
-go run ./examples/triage -message "Mein Konto wurde zweimal belastet" -v
+go run ./examples/triage -message "Die Rechnung wurde zweimal belastet und der Kunde ist nicht zufrieden" -v
 
-# without exporting it first
+# a server instead, needing no Python on this machine at all
+go run ./examples/triage -url http://gpu-box:8600
+
+# a sidecar, without exporting the interpreter first
 LAYA_PYTHON=.venv/bin/python3 go run ./examples/triage
 ```
 
-On an Apple Silicon Mac the interpreter picks the Metal backend on its own; pass
-`-device cpu` if that misbehaves, at a few hundred milliseconds per call instead of tens.
+On an Apple Silicon Mac the sidecar picks the Metal backend on its own; pass `-device cpu`
+if that misbehaves, at a few hundred milliseconds per call instead of tens.
 
 | flag | does |
 | --- | --- |
 | `-message` | the ticket to triage |
-| `-device` | `cuda`, `cpu` or `mps`; autodetected by default |
+| `-url` | ask a server rather than starting a sidecar; defaults to `$LAYA_URL` |
+| `-device` | `cuda`, `cpu` or `mps`; autodetected by default (sidecar only) |
 | `-model` | pin a checkpoint instead of routing: `english`, `multilingual`, `typed-decisions` |
-| `-v` | show the download progress and warnings the interpreter prints |
+| `-v` | show the download progress and warnings the interpreter prints (sidecar only) |
 
-It prints the routing decision, every answer, and the action its policy chose — the numbers
-below are illustrative, not a recorded run:
+It prints which runtime answered, the routing decision, every answer, and the action its
+policy chose — the numbers below are illustrative, not a recorded run:
 
 ```
+runtime    : sidecar running .venv/bin/python3
 routing    : english (English Latin text)
 
 intent     : refund (0.87 confident, runners-up [billing_question cancellation])
