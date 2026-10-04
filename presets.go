@@ -1,5 +1,10 @@
 package laya
 
+import (
+	"encoding/json"
+	"regexp"
+)
+
 // Ready-made batteries for the workflows Laya ships presets for. Each is a
 // plain [Questions] value: copy one, drop a question, reword another. They are
 // a starting point with sensible wording, not a contract.
@@ -7,6 +12,60 @@ package laya
 // The field names the questions refer to, such as `message` or `prompt`, are
 // the keys your state should use, because the wording is what tells the model
 // where to look.
+
+var stateFieldRe = regexp.MustCompile("`(\\w+)`")
+
+// StateField returns the state key questions read, or "" when that is not exactly one key.
+//
+// Every built-in preset names a single field -- `message`, `body`, `prompt`, `post`, `request` --
+// and a caller that puts its text under a different key is asking the model about a field that is
+// not in the state. Surfacing the name lets a caller place the text correctly instead of guessing.
+// An empty return string covers both "names nothing" and "names several distinct keys".
+func StateField(questions Questions) string {
+	named := map[string]bool{}
+	for _, q := range questions {
+		if q == nil {
+			continue
+		}
+		var insStr string
+		switch v := q.(type) {
+		case Noul:
+			insStr = contentToString(v.Instructions)
+		case Choice:
+			insStr = contentToString(v.Instructions)
+		case Score:
+			insStr = contentToString(v.Instructions)
+		}
+		matches := stateFieldRe.FindAllStringSubmatch(insStr, -1)
+		for _, m := range matches {
+			if len(m) > 1 && m[1] != "" {
+				named[m[1]] = true
+			}
+		}
+	}
+	if len(named) != 1 {
+		return ""
+	}
+	for name := range named {
+		return name
+	}
+	return ""
+}
+
+func contentToString(c Content) string {
+	switch v := c.(type) {
+	case string:
+		return v
+	case nil:
+		return ""
+	default:
+		data, err := json.Marshal(v)
+		if err != nil {
+			return ""
+		}
+		return string(data)
+	}
+}
 
 // TriageQuestions rates a support ticket: what the customer wants, how
 // urgently, how annoyed they are, and whether they are about to leave.

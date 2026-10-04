@@ -17,6 +17,16 @@ const (
 	KindScore  Kind = "score"
 )
 
+// Confidence gate / abstention states reported on answers when min_confidence is configured.
+const (
+	// GatePassed indicates the confidence gate ran and this answer's confidence cleared it.
+	GatePassed = "passed"
+	// GateAbstained indicates the confidence gate ran and this answer's confidence fell below the threshold.
+	GateAbstained = "abstained"
+	// GateUnevaluated indicates the confidence gate ran but this answer carried no usable confidence.
+	GateUnevaluated = "unevaluated"
+)
+
 // Answer is one typed decision returned by the model. The concrete types are
 // [NoulAnswer], [ChoiceAnswer] and [ScoreAnswer].
 //
@@ -24,8 +34,10 @@ const (
 type Answer interface {
 	// Kind reports which of the three answer types this is.
 	Kind() Kind
-	// Confidence summarises how concentrated the distribution was, from 0 to 1.
+	// Confidence summarises how concentrated the distribution was, from 0 to 1 (normalized entropy).
 	Confidence() float64
+	// AnswerConfidence reports the calibrated max(p) confidence for this answer.
+	AnswerConfidence() float64
 	sealed()
 }
 
@@ -35,8 +47,16 @@ type NoulAnswer struct {
 	Value float64
 	// Conf is max(Value, 1-Value): how far the model is from undecided.
 	Conf float64
+	// AnsConf is the calibrated answer_confidence (max(p)).
+	AnsConf float64
 	// Action is the model's auxiliary action head output.
 	Action Action
+	// LowConfidence indicates whether min_confidence triggered abstention on this answer.
+	LowConfidence bool
+	// Abstention reports "passed", "abstained", or "unevaluated" when a gate was run.
+	Abstention string
+	// AbstentionThreshold reports the threshold this answer was gated against.
+	AbstentionThreshold *float64
 }
 
 // Kind implements [Answer].
@@ -44,7 +64,16 @@ func (NoulAnswer) Kind() Kind { return KindNoul }
 
 // Confidence implements [Answer].
 func (n NoulAnswer) Confidence() float64 { return n.Conf }
-func (NoulAnswer) sealed()               {}
+
+// AnswerConfidence implements [Answer].
+func (n NoulAnswer) AnswerConfidence() float64 {
+	if n.AnsConf != 0 {
+		return n.AnsConf
+	}
+	return n.Conf
+}
+
+func (NoulAnswer) sealed() {}
 
 // ChoiceAnswer is the option selected from a [Choice], with the full distribution.
 type ChoiceAnswer struct {
@@ -55,8 +84,16 @@ type ChoiceAnswer struct {
 	// Conf summarises how concentrated Probabilities is, from 0 to 1. It says
 	// how clearly one option beat the others, not whether acting is safe.
 	Conf float64
+	// AnsConf is the calibrated answer_confidence (max(p)).
+	AnsConf float64
 	// Action is the model's auxiliary action head output.
 	Action Action
+	// LowConfidence indicates whether min_confidence triggered abstention on this answer.
+	LowConfidence bool
+	// Abstention reports "passed", "abstained", or "unevaluated" when a gate was run.
+	Abstention string
+	// AbstentionThreshold reports the threshold this answer was gated against.
+	AbstentionThreshold *float64
 }
 
 // Kind implements [Answer].
@@ -64,7 +101,16 @@ func (ChoiceAnswer) Kind() Kind { return KindChoice }
 
 // Confidence implements [Answer].
 func (c ChoiceAnswer) Confidence() float64 { return c.Conf }
-func (ChoiceAnswer) sealed()               {}
+
+// AnswerConfidence implements [Answer].
+func (c ChoiceAnswer) AnswerConfidence() float64 {
+	if c.AnsConf != 0 {
+		return c.AnsConf
+	}
+	return c.Conf
+}
+
+func (ChoiceAnswer) sealed() {}
 
 // Runners returns the options ordered from most to least probable.
 func (c ChoiceAnswer) Runners() []string {
@@ -92,8 +138,16 @@ type ScoreAnswer struct {
 	Probabilities map[string]float64
 	// Conf summarises how concentrated Probabilities is, from 0 to 1.
 	Conf float64
+	// AnsConf is the calibrated answer_confidence (max(p)).
+	AnsConf float64
 	// Action is the model's auxiliary action head output.
 	Action Action
+	// LowConfidence indicates whether min_confidence triggered abstention on this answer.
+	LowConfidence bool
+	// Abstention reports "passed", "abstained", or "unevaluated" when a gate was run.
+	Abstention string
+	// AbstentionThreshold reports the threshold this answer was gated against.
+	AbstentionThreshold *float64
 }
 
 // Kind implements [Answer].
@@ -101,7 +155,16 @@ func (ScoreAnswer) Kind() Kind { return KindScore }
 
 // Confidence implements [Answer].
 func (s ScoreAnswer) Confidence() float64 { return s.Conf }
-func (ScoreAnswer) sealed()               {}
+
+// AnswerConfidence implements [Answer].
+func (s ScoreAnswer) AnswerConfidence() float64 {
+	if s.AnsConf != 0 {
+		return s.AnsConf
+	}
+	return s.Conf
+}
+
+func (ScoreAnswer) sealed() {}
 
 // Nearest returns the index and description of the closest whole level.
 func (s ScoreAnswer) Nearest() (int, string) {
@@ -188,14 +251,18 @@ func (a Answers) MustNoul(id string) float64 {
 
 // wireAnswer is the untyped shape Laya returns, before it is narrowed.
 type wireAnswer struct {
-	Type          Kind               `json:"type"`
-	Noul          float64            `json:"noul"`
-	Choice        string             `json:"choice"`
-	Score         float64            `json:"score"`
-	Legend        map[string]string  `json:"legend"`
-	Probabilities map[string]float64 `json:"probabilities"`
-	Confidence    float64            `json:"confidence"`
-	Action        Action             `json:"action"`
+	Type                Kind               `json:"type"`
+	Noul                float64            `json:"noul"`
+	Choice              string             `json:"choice"`
+	Score               float64            `json:"score"`
+	Legend              map[string]string  `json:"legend"`
+	Probabilities       map[string]float64 `json:"probabilities"`
+	Confidence          float64            `json:"confidence"`
+	AnswerConfidence    *float64           `json:"answer_confidence"`
+	Action              Action             `json:"action"`
+	LowConfidence       bool               `json:"low_confidence"`
+	Abstention          string             `json:"abstention"`
+	AbstentionThreshold *float64           `json:"abstention_threshold"`
 }
 
 // UnmarshalJSON implements [json.Unmarshaler], narrowing each answer to its type.
@@ -206,23 +273,43 @@ func (a *Answers) UnmarshalJSON(data []byte) error {
 	}
 	out := make(Answers, len(wire))
 	for id, w := range wire {
+		ansConf := w.Confidence
+		if w.AnswerConfidence != nil {
+			ansConf = *w.AnswerConfidence
+		}
 		switch w.Type {
 		case KindNoul:
-			out[id] = NoulAnswer{Value: w.Noul, Conf: w.Confidence, Action: w.Action}
+			out[id] = NoulAnswer{
+				Value:               w.Noul,
+				Conf:                w.Confidence,
+				AnsConf:             ansConf,
+				Action:              w.Action,
+				LowConfidence:       w.LowConfidence,
+				Abstention:          w.Abstention,
+				AbstentionThreshold: w.AbstentionThreshold,
+			}
 		case KindChoice:
 			out[id] = ChoiceAnswer{
-				Selected:      w.Choice,
-				Probabilities: w.Probabilities,
-				Conf:          w.Confidence,
-				Action:        w.Action,
+				Selected:            w.Choice,
+				Probabilities:       w.Probabilities,
+				Conf:                w.Confidence,
+				AnsConf:             ansConf,
+				Action:              w.Action,
+				LowConfidence:       w.LowConfidence,
+				Abstention:          w.Abstention,
+				AbstentionThreshold: w.AbstentionThreshold,
 			}
 		case KindScore:
 			out[id] = ScoreAnswer{
-				Value:         w.Score,
-				Legend:        w.Legend,
-				Probabilities: w.Probabilities,
-				Conf:          w.Confidence,
-				Action:        w.Action,
+				Value:               w.Score,
+				Legend:              w.Legend,
+				Probabilities:       w.Probabilities,
+				Conf:                w.Confidence,
+				AnsConf:             ansConf,
+				Action:              w.Action,
+				LowConfidence:       w.LowConfidence,
+				Abstention:          w.Abstention,
+				AbstentionThreshold: w.AbstentionThreshold,
 			}
 		default:
 			return fmt.Errorf("laya: unknown answer type %q for question %q", w.Type, id)

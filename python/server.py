@@ -6,7 +6,7 @@ laya itself, so there is nothing to install and nothing to read before trusting 
     $ pip install laya
     $ python3 python/server.py --preload english,multilingual --device cuda
 
-    POST /v1/predict  {"state": ..., "questions": {...}, "model": "", "task": "", "lang": ""}
+    POST /v1/predict  {"state": ..., "questions": {...}, "model": "", "task": "", "lang": "", "min_confidence": 0.8}
     POST /v1/route    the same body, answered without a forward pass
     POST /v1/warm     {"models": ["english"]}
     GET  /healthz
@@ -74,6 +74,7 @@ class Engine:
                 model=blank_to_none(body.get("model")),
                 task=blank_to_none(body.get("task")),
                 lang=blank_to_none(body.get("lang")),
+                lang_guess=blank_to_none(body.get("lang_guess")),
             )
         )
 
@@ -81,11 +82,28 @@ class Engine:
         questions = body.get("questions") or {}
         if not questions:
             raise ValueError("no questions")
-        decision = self.route(body)
+        kwargs = {}
+        if body.get("model") is not None:
+            kwargs["model"] = blank_to_none(body.get("model"))
+        if body.get("task") is not None:
+            kwargs["task"] = blank_to_none(body.get("task"))
+        if body.get("lang") is not None:
+            kwargs["lang"] = blank_to_none(body.get("lang"))
+        if body.get("lang_guess") is not None:
+            kwargs["lang_guess"] = blank_to_none(body.get("lang_guess"))
+        if body.get("max_len"):
+            kwargs["max_len"] = int(body["max_len"])
+        if body.get("head_max_len"):
+            kwargs["head_max_len"] = int(body["head_max_len"])
+        if body.get("min_confidence") is not None:
+            kwargs["min_confidence"] = body["min_confidence"]
+
         with self.lock:
-            result = self.agent(decision["model"]).system_one(body.get("state"), questions)
-        result["routing"] = decision
-        return result
+            return self.router.predict(
+                body.get("state"),
+                questions,
+                **kwargs,
+            )
 
     def warm(self, body):
         models = body.get("models") or None

@@ -3,6 +3,7 @@ package laya
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Question is one typed decision to ask about a state. The three
@@ -36,6 +37,13 @@ type Noul struct {
 	// usually sharpens the answer, because it pins down the boundary. Left out,
 	// Laya falls back to "yes, the statement holds" and "no, it does not".
 	Criteria *NoulCriteria
+	// Labels customises the model-facing label text for "false" and "true",
+	// while preserving standard boolean return semantics (value close to 1
+	// means true).
+	Labels map[string]string
+	// OptionOrder permutes the slot order (e.g. []int{1, 0}) to test or
+	// mitigate positional bias across question rotations.
+	OptionOrder []int
 }
 
 // NoulCriteria describes the two ends of a [Noul].
@@ -54,16 +62,42 @@ func (n Noul) validate() error {
 	if isEmptyContent(n.Instructions) {
 		return fmt.Errorf("noul: instructions are required")
 	}
+	if len(n.Labels) > 0 {
+		if len(n.Labels) != 2 {
+			return fmt.Errorf("noul: labels must map exactly 'false' and 'true' to distinct non-empty strings")
+		}
+		falseLabel, hasFalse := n.Labels["false"]
+		trueLabel, hasTrue := n.Labels["true"]
+		if !hasFalse || !hasTrue {
+			return fmt.Errorf("noul: labels must map exactly 'false' and 'true' to distinct non-empty strings")
+		}
+		falseLabel = strings.TrimSpace(falseLabel)
+		trueLabel = strings.TrimSpace(trueLabel)
+		if falseLabel == "" || trueLabel == "" || falseLabel == trueLabel {
+			return fmt.Errorf("noul: labels must map exactly 'false' and 'true' to distinct non-empty strings")
+		}
+	}
+	if len(n.OptionOrder) > 0 && !isValidPermutation(n.OptionOrder, 2) {
+		return fmt.Errorf("noul: option_order must be a permutation of indices [0, 1]")
+	}
 	return nil
 }
 
 // MarshalJSON implements [json.Marshaler].
 func (n Noul) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Type         Kind          `json:"type"`
-		Instructions Content       `json:"instructions"`
-		Criteria     *NoulCriteria `json:"criteria,omitempty"`
-	}{KindNoul, n.Instructions, n.Criteria})
+		Type         Kind              `json:"type"`
+		Instructions Content           `json:"instructions"`
+		Criteria     *NoulCriteria     `json:"criteria,omitempty"`
+		Labels       map[string]string `json:"labels,omitempty"`
+		OptionOrder  []int             `json:"option_order,omitempty"`
+	}{
+		Type:         KindNoul,
+		Instructions: n.Instructions,
+		Criteria:     n.Criteria,
+		Labels:       n.Labels,
+		OptionOrder:  n.OptionOrder,
+	})
 }
 
 // Choice picks exactly one option from a set you define, and returns the whole
@@ -79,6 +113,8 @@ type Choice struct {
 	// Criteria maps each option to a description of it. An empty description is
 	// allowed when the option name speaks for itself. At least two are required.
 	Criteria map[string]string
+	// OptionOrder permutes the slot order of options to mitigate positional bias.
+	OptionOrder []int
 }
 
 // Kind implements [Question].
@@ -96,6 +132,9 @@ func (c Choice) validate() error {
 		if option == "" {
 			return fmt.Errorf("choice: an option name is empty")
 		}
+	}
+	if len(c.OptionOrder) > 0 && !isValidPermutation(c.OptionOrder, len(c.Criteria)) {
+		return fmt.Errorf("choice: option_order must be a valid permutation of option indices 0..%d", len(c.Criteria)-1)
 	}
 	return nil
 }
@@ -116,7 +155,13 @@ func (c Choice) MarshalJSON() ([]byte, error) {
 		Type         Kind           `json:"type"`
 		Instructions Content        `json:"instructions"`
 		Criteria     map[string]any `json:"criteria"`
-	}{KindChoice, c.Instructions, criteria})
+		OptionOrder  []int          `json:"option_order,omitempty"`
+	}{
+		Type:         KindChoice,
+		Instructions: c.Instructions,
+		Criteria:     criteria,
+		OptionOrder:  c.OptionOrder,
+	})
 }
 
 // Score rates a state against ordered levels and returns a probability
@@ -127,10 +172,12 @@ func (c Choice) MarshalJSON() ([]byte, error) {
 // threshold is what you actually need, a [Noul] is usually sharper.
 type Score struct {
 	// Instructions is what the model should rate. Required.
-	Instructions Content
 	// Criteria is the ordered list of level descriptions, lowest first. At
 	// least two are required.
-	Criteria []Content
+	Instructions Content
+	Criteria     []Content
+	// OptionOrder permutes the slot order of levels.
+	OptionOrder []int
 }
 
 // Kind implements [Question].
@@ -149,6 +196,9 @@ func (s Score) validate() error {
 			return fmt.Errorf("score: level %d is empty", i)
 		}
 	}
+	if len(s.OptionOrder) > 0 && !isValidPermutation(s.OptionOrder, len(s.Criteria)) {
+		return fmt.Errorf("score: option_order must be a valid permutation of level indices 0..%d", len(s.Criteria)-1)
+	}
 	return nil
 }
 
@@ -158,7 +208,13 @@ func (s Score) MarshalJSON() ([]byte, error) {
 		Type         Kind      `json:"type"`
 		Instructions Content   `json:"instructions"`
 		Criteria     []Content `json:"criteria"`
-	}{KindScore, s.Instructions, s.Criteria})
+		OptionOrder  []int     `json:"option_order,omitempty"`
+	}{
+		Type:         KindScore,
+		Instructions: s.Instructions,
+		Criteria:     s.Criteria,
+		OptionOrder:  s.OptionOrder,
+	})
 }
 
 // Questions is a battery of questions keyed by an id you choose. The answer to
@@ -239,4 +295,19 @@ func isEmptyContent(c Content) bool {
 		return v == ""
 	}
 	return false
+}
+
+// isValidPermutation reports whether order is a permutation of 0..n-1.
+func isValidPermutation(order []int, n int) bool {
+	if len(order) != n {
+		return false
+	}
+	seen := make([]bool, n)
+	for _, idx := range order {
+		if idx < 0 || idx >= n || seen[idx] {
+			return false
+		}
+		seen[idx] = true
+	}
+	return true
 }

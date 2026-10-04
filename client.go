@@ -222,6 +222,15 @@ type Request struct {
 	// Lang skips language detection when you already know the language. Any
 	// code but "en" routes to the multilingual checkpoint.
 	Lang string `json:"lang,omitempty"`
+	// LangGuess provides a language hint or guess to the router.
+	LangGuess string `json:"lang_guess,omitempty"`
+	// MaxLen sets the total sequence token budget for this request.
+	MaxLen int `json:"max_len,omitempty"`
+	// HeadMaxLen sets the token budget allocated to question options.
+	HeadMaxLen int `json:"head_max_len,omitempty"`
+	// MinConfidence sets the threshold for confidence gating / abstention.
+	// Can be a float64 or a map[string]float64.
+	MinConfidence any `json:"min_confidence,omitempty"`
 }
 
 // Response is the result of one evaluation.
@@ -274,6 +283,31 @@ func UseTask(task string) CallOption {
 // guess. Any code but "en" routes to the multilingual checkpoint.
 func UseLang(lang string) CallOption {
 	return func(r *Request) { r.Lang = lang }
+}
+
+// UseLangGuess provides a language hint or guess to the router.
+func UseLangGuess(hint string) CallOption {
+	return func(r *Request) { r.LangGuess = hint }
+}
+
+// UseMaxLen overrides the max sequence token budget for this call.
+func UseMaxLen(maxLen int) CallOption {
+	return func(r *Request) { r.MaxLen = maxLen }
+}
+
+// UseHeadMaxLen overrides the option token budget (e.g. 512 for wide choices).
+func UseHeadMaxLen(headMaxLen int) CallOption {
+	return func(r *Request) { r.HeadMaxLen = headMaxLen }
+}
+
+// UseMinConfidence sets a confidence threshold below which answers are marked low_confidence / abstained.
+func UseMinConfidence(minConfidence float64) CallOption {
+	return func(r *Request) { r.MinConfidence = minConfidence }
+}
+
+// UseMinConfidenceMap sets per-question-shape or per-qid confidence thresholds (e.g. {"choice:3-5": 0.85, "default": 0.5}).
+func UseMinConfidenceMap(minConfidence map[string]float64) CallOption {
+	return func(r *Request) { r.MinConfidence = minConfidence }
 }
 
 // Ask evaluates state against a battery of questions in one forward pass.
@@ -356,7 +390,7 @@ func (c *Client) Route(ctx context.Context, state any, questions Questions, opts
 		}
 	}
 	decision := Route(req.State, req.Questions, RouteOptions{
-		Model: req.Model, Task: req.Task, Lang: req.Lang,
+		Model: req.Model, Task: req.Task, Lang: req.Lang, LangGuess: req.LangGuess,
 	})
 	return &decision, nil
 }

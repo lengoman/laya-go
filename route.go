@@ -138,6 +138,8 @@ type RouteOptions struct {
 	Task string
 	// Lang states the language, skipping detection.
 	Lang string
+	// LangGuess provides a language hint or guess to the router.
+	LangGuess string
 	// Default is the checkpoint used when a state holds no letters. Empty
 	// means [ModelEnglish].
 	Default string
@@ -153,7 +155,7 @@ type RouteOptions struct {
 // no Python in sight.
 //
 // Precedence: explicit Model, then Task, then a detected workflow when opted
-// in, then explicit Lang, then the detected script and language, then the
+// in, then explicit Lang, then LangGuess hint, then the detected script and language, then the
 // default.
 //
 // Script detection is exact. The Latin-script language guess is a
@@ -203,6 +205,15 @@ func Route(state any, questions Questions, opts RouteOptions) RouteDecision {
 			model = ModelEnglish
 		}
 		return decide(model, fmt.Sprintf("explicit lang=%q", opts.Lang), nil, workflow)
+	}
+
+	if opts.LangGuess != "" {
+		model := ModelMultilingual
+		switch strings.SplitN(strings.ToLower(opts.LangGuess), "-", 2)[0] {
+		case "en", "eng", "english":
+			model = ModelEnglish
+		}
+		return decide(model, fmt.Sprintf("language guess %q", opts.LangGuess), nil, workflow)
 	}
 
 	detection := Analyse(state)
