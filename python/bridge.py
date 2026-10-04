@@ -6,10 +6,10 @@ object per line out. It is also runnable by hand, which is the easiest way to se
 side sees:
 
     $ pip install laya
-    $ echo '{"op":"route","state":"मुझसे दो बार शुल्क लिया गया"}' | python3 python/bridge.py
+    $ echo '{"op":"route","state":"मुझे दो बार शुल्क लिया गया"}' | python3 python/bridge.py
 
 Requests
-    {"op": "predict", "state": ..., "questions": {...}, "model": "", "task": "", "lang": ""}
+    {"op": "predict", "state": ..., "questions": {...}, "model": "", "task": "", "lang": "", "min_confidence": 0.8}
     {"op": "route",   ... the same fields, answered without a forward pass}
     {"op": "warm",    "models": ["english", "multilingual"]}
     {"op": "ping"}
@@ -91,6 +91,7 @@ class Bridge:
                 model=blank_to_none(request.get("model")),
                 task=blank_to_none(request.get("task")),
                 lang=blank_to_none(request.get("lang")),
+                lang_guess=blank_to_none(request.get("lang_guess")),
             )
         )
 
@@ -98,10 +99,27 @@ class Bridge:
         questions = request.get("questions") or {}
         if not questions:
             raise ValueError("no questions")
-        decision = self.route(request)
-        result = self.agent(decision["model"]).system_one(request.get("state"), questions)
-        result["routing"] = decision
-        return result
+        kwargs = {}
+        if request.get("model") is not None:
+            kwargs["model"] = blank_to_none(request.get("model"))
+        if request.get("task") is not None:
+            kwargs["task"] = blank_to_none(request.get("task"))
+        if request.get("lang") is not None:
+            kwargs["lang"] = blank_to_none(request.get("lang"))
+        if request.get("lang_guess") is not None:
+            kwargs["lang_guess"] = blank_to_none(request.get("lang_guess"))
+        if request.get("max_len"):
+            kwargs["max_len"] = int(request["max_len"])
+        if request.get("head_max_len"):
+            kwargs["head_max_len"] = int(request["head_max_len"])
+        if request.get("min_confidence") is not None:
+            kwargs["min_confidence"] = request["min_confidence"]
+
+        return self.router.predict(
+            request.get("state"),
+            questions,
+            **kwargs,
+        )
 
     def warm(self, request):
         models = request.get("models") or None

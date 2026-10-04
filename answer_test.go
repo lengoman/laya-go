@@ -14,7 +14,11 @@ const answersJSON = `{
     "choice": "billing",
     "probabilities": {"billing": 0.94, "technical": 0.04, "sales": 0.02},
     "confidence": 0.9123,
-    "action": {"act_probability": 0.77}
+    "answer_confidence": 0.9400,
+    "action": {"act_probability": 0.77},
+    "low_confidence": false,
+    "abstention": "passed",
+    "abstention_threshold": 0.8
   },
   "urgency": {
     "type": "score",
@@ -22,12 +26,17 @@ const answersJSON = `{
     "legend": {"0": "not urgent", "1": "soon", "2": "critical deadline"},
     "probabilities": {"0": 0.05, "1": 0.06, "2": 0.89},
     "confidence": 0.8412,
-    "action": {"act_probability": 0.51}
+    "answer_confidence": 0.8900,
+    "action": {"act_probability": 0.51},
+    "low_confidence": true,
+    "abstention": "abstained",
+    "abstention_threshold": 0.95
   },
   "churn_risk": {
     "type": "noul",
     "noul": 0.892,
     "confidence": 0.892,
+    "answer_confidence": 0.892,
     "action": {"act_probability": 0.42}
   }
 }`
@@ -62,8 +71,20 @@ func TestAnswersNarrowToTheirType(t *testing.T) {
 	if department.Conf != 0.9123 {
 		t.Errorf("confidence = %v, want 0.9123", department.Conf)
 	}
+	if department.AnswerConfidence() != 0.9400 {
+		t.Errorf("answer_confidence = %v, want 0.9400", department.AnswerConfidence())
+	}
 	if department.Action.Probability != 0.77 {
 		t.Errorf("act_probability = %v, want 0.77", department.Action.Probability)
+	}
+	if department.LowConfidence {
+		t.Errorf("department low_confidence = %v, want false", department.LowConfidence)
+	}
+	if department.Abstention != GatePassed {
+		t.Errorf("department abstention = %q, want %q", department.Abstention, GatePassed)
+	}
+	if department.AbstentionThreshold == nil || *department.AbstentionThreshold != 0.8 {
+		t.Errorf("department abstention_threshold = %v, want 0.8", department.AbstentionThreshold)
 	}
 
 	urgency, err := answers.Score("urgency")
@@ -72,6 +93,15 @@ func TestAnswersNarrowToTheirType(t *testing.T) {
 	}
 	if urgency.Value != 1.84 {
 		t.Errorf("score = %v, want 1.84", urgency.Value)
+	}
+	if urgency.AnswerConfidence() != 0.8900 {
+		t.Errorf("answer_confidence = %v, want 0.8900", urgency.AnswerConfidence())
+	}
+	if !urgency.LowConfidence {
+		t.Errorf("urgency low_confidence = %v, want true", urgency.LowConfidence)
+	}
+	if urgency.Abstention != GateAbstained {
+		t.Errorf("urgency abstention = %q, want %q", urgency.Abstention, GateAbstained)
 	}
 	if level, label := urgency.Nearest(); level != 2 || label != "critical deadline" {
 		t.Errorf("Nearest() = %d, %q, want 2, critical deadline", level, label)

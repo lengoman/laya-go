@@ -43,6 +43,27 @@ func TestNoulMarshalsCriteria(t *testing.T) {
 	}
 }
 
+func TestNoulMarshalsLabelsAndOptionOrder(t *testing.T) {
+	q := Noul{
+		Instructions: "Is the claim verified?",
+		Labels:       map[string]string{"false": "Unverified", "true": "Verified"},
+		OptionOrder:  []int{1, 0},
+	}
+	wire := marshalQuestion(t, q)
+
+	labels, ok := wire["labels"].(map[string]any)
+	if !ok {
+		t.Fatalf("labels = %#v, want an object", wire["labels"])
+	}
+	if labels["false"] != "Unverified" || labels["true"] != "Verified" {
+		t.Errorf("labels = %#v", labels)
+	}
+	order, ok := wire["option_order"].([]any)
+	if !ok || len(order) != 2 || order[0].(float64) != 1 || order[1].(float64) != 0 {
+		t.Errorf("option_order = %#v, want [1, 0]", wire["option_order"])
+	}
+}
+
 func TestChoiceSendsMissingDescriptionsAsNull(t *testing.T) {
 	// An empty description must reach the model as null, so the option renders
 	// as its bare name rather than "name: ".
@@ -63,6 +84,19 @@ func TestChoiceSendsMissingDescriptionsAsNull(t *testing.T) {
 	}
 }
 
+func TestChoiceMarshalsOptionOrder(t *testing.T) {
+	c := Choice{
+		Instructions: "Choose an option",
+		Criteria:     map[string]string{"a": "desc a", "b": "desc b", "c": "desc c"},
+		OptionOrder:  []int{2, 0, 1},
+	}
+	wire := marshalQuestion(t, c)
+	order, ok := wire["option_order"].([]any)
+	if !ok || len(order) != 3 || order[0].(float64) != 2 || order[1].(float64) != 0 || order[2].(float64) != 1 {
+		t.Errorf("option_order = %#v, want [2, 0, 1]", wire["option_order"])
+	}
+}
+
 func TestScoreMarshalsOrderedLevels(t *testing.T) {
 	wire := marshalQuestion(t, Levels("How urgent?", "calm", "soon", "now"))
 
@@ -78,6 +112,19 @@ func TestScoreMarshalsOrderedLevels(t *testing.T) {
 		if criteria[i] != level {
 			t.Errorf("level %d = %v, want %q", i, criteria[i], level)
 		}
+	}
+}
+
+func TestScoreMarshalsOptionOrder(t *testing.T) {
+	s := Score{
+		Instructions: "Rate urgency",
+		Criteria:     []Content{"low", "med", "high"},
+		OptionOrder:  []int{1, 2, 0},
+	}
+	wire := marshalQuestion(t, s)
+	order, ok := wire["option_order"].([]any)
+	if !ok || len(order) != 3 || order[0].(float64) != 1 || order[1].(float64) != 2 || order[2].(float64) != 0 {
+		t.Errorf("option_order = %#v, want [1, 2, 0]", wire["option_order"])
 	}
 }
 
@@ -105,10 +152,19 @@ func TestQuestionsValidate(t *testing.T) {
 		{"empty battery", Questions{}, true},
 		{"nil question", Questions{"a": nil}, true},
 		{"noul without instructions", Questions{"a": Noul{}}, true},
+		{"noul with invalid labels count", Questions{"a": Noul{Instructions: "Is it?", Labels: map[string]string{"true": "yes"}}}, true},
+		{"noul with identical labels", Questions{"a": Noul{Instructions: "Is it?", Labels: map[string]string{"true": "same", "false": "same"}}}, true},
+		{"noul with invalid option order length", Questions{"a": Noul{Instructions: "Is it?", OptionOrder: []int{0}}}, true},
+		{"noul with invalid option order permutation", Questions{"a": Noul{Instructions: "Is it?", OptionOrder: []int{0, 0}}}, true},
+		{"noul with valid labels and order", Questions{"a": Noul{Instructions: "Is it?", Labels: map[string]string{"true": "yes", "false": "no"}, OptionOrder: []int{1, 0}}}, false},
 		{"choice with one option", Questions{"a": Options("Which?", "only")}, true},
 		{"choice with a blank option", Questions{"a": OneOf("Which?", map[string]string{"": "x", "b": "y"})}, true},
+		{"choice with invalid option order", Questions{"a": Choice{Instructions: "Which?", Criteria: map[string]string{"a": "1", "b": "2"}, OptionOrder: []int{0, 2}}}, true},
+		{"choice with valid option order", Questions{"a": Choice{Instructions: "Which?", Criteria: map[string]string{"a": "1", "b": "2"}, OptionOrder: []int{1, 0}}}, false},
 		{"score with one level", Questions{"a": Levels("How much?", "some")}, true},
 		{"score with an empty level", Questions{"a": Score{Instructions: "How much?", Criteria: []Content{"low", ""}}}, true},
+		{"score with invalid option order", Questions{"a": Score{Instructions: "How much?", Criteria: []Content{"low", "med", "high"}, OptionOrder: []int{0, 1}}}, true},
+		{"score with valid option order", Questions{"a": Score{Instructions: "How much?", Criteria: []Content{"low", "med", "high"}, OptionOrder: []int{2, 1, 0}}}, false},
 		{"a valid battery", TriageQuestions(), false},
 	}
 

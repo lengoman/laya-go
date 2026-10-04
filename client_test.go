@@ -94,10 +94,14 @@ func TestAskDecodesAWholeResponse(t *testing.T) {
 
 func TestAskSendsStateQuestionsAndModel(t *testing.T) {
 	var body struct {
-		State     map[string]any             `json:"state"`
-		Questions map[string]json.RawMessage `json:"questions"`
-		Model     string                     `json:"model"`
-		Lang      string                     `json:"lang"`
+		State         map[string]any             `json:"state"`
+		Questions     map[string]json.RawMessage `json:"questions"`
+		Model         string                     `json:"model"`
+		Lang          string                     `json:"lang"`
+		LangGuess     string                     `json:"lang_guess"`
+		MaxLen        int                        `json:"max_len"`
+		HeadMaxLen    int                        `json:"head_max_len"`
+		MinConfidence any                        `json:"min_confidence"`
 	}
 
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -108,7 +112,14 @@ func TestAskSendsStateQuestionsAndModel(t *testing.T) {
 	})
 
 	state := map[string]any{"subject": "Duplicate charge", "body": "Refund it"}
-	if _, err := client.Ask(context.Background(), state, battery(), UseModel("multi"), UseLang("de")); err != nil {
+	if _, err := client.Ask(context.Background(), state, battery(),
+		UseModel("multi"),
+		UseLang("de"),
+		UseLangGuess("de"),
+		UseMaxLen(512),
+		UseHeadMaxLen(256),
+		UseMinConfidence(0.85),
+	); err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
 
@@ -123,6 +134,18 @@ func TestAskSendsStateQuestionsAndModel(t *testing.T) {
 	}
 	if body.Lang != "de" {
 		t.Errorf("lang = %q, want de", body.Lang)
+	}
+	if body.LangGuess != "de" {
+		t.Errorf("lang_guess = %q, want de", body.LangGuess)
+	}
+	if body.MaxLen != 512 {
+		t.Errorf("max_len = %d, want 512", body.MaxLen)
+	}
+	if body.HeadMaxLen != 256 {
+		t.Errorf("head_max_len = %d, want 256", body.HeadMaxLen)
+	}
+	if conf, ok := body.MinConfidence.(float64); !ok || conf != 0.85 {
+		t.Errorf("min_confidence = %v, want 0.85", body.MinConfidence)
 	}
 }
 
@@ -251,7 +274,7 @@ func TestRouteFallsBackToTheLocalPort(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	decision, err := client.Route(context.Background(), "मुझसे दो बार शुल्क लिया गया", battery())
+	decision, err := client.Route(context.Background(), "मुझे दो बार शुल्क लिया गया", battery())
 	if err != nil {
 		t.Fatalf("Route: %v", err)
 	}

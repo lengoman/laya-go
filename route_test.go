@@ -25,7 +25,7 @@ func TestRouteByScriptAndLanguage(t *testing.T) {
 			// The English checkpoint cannot read Devanagari at all: it scores
 			// near random while reporting high confidence.
 			name:       "Devanagari goes multilingual",
-			state:      map[string]any{"body": "मुझसे दो बार शुल्क लिया गया, कृपया पैसे वापस करें।"},
+			state:      map[string]any{"body": "मुझे दो बार शुल्क लिया गया, कृपया पैसे वापस करें।"},
 			wantModel:  ModelMultilingual,
 			wantScript: "devanagari",
 			wantReason: "non-Latin script",
@@ -78,7 +78,7 @@ func TestRouteByScriptAndLanguage(t *testing.T) {
 }
 
 func TestRoutePrecedence(t *testing.T) {
-	hindi := "मुझसे दो बार शुल्क लिया गया"
+	hindi := "मुझे दो बार शुल्क लिया गया"
 
 	tests := []struct {
 		name      string
@@ -90,6 +90,8 @@ func TestRoutePrecedence(t *testing.T) {
 		{"explicit task selects its checkpoint", RouteOptions{Task: TaskTypedDecisions}, ModelTypedDecisions, "explicit task"},
 		{"explicit lang skips detection", RouteOptions{Lang: "en-GB"}, ModelEnglish, "explicit lang"},
 		{"a non-English lang goes multilingual", RouteOptions{Lang: "fr"}, ModelMultilingual, "explicit lang"},
+		{"lang guess hints english", RouteOptions{LangGuess: "en"}, ModelEnglish, "language guess"},
+		{"lang guess hints multilingual", RouteOptions{LangGuess: "pt"}, ModelMultilingual, "language guess"},
 	}
 
 	for _, tc := range tests {
@@ -231,7 +233,7 @@ func TestIsEnglish(t *testing.T) {
 	if !IsEnglish("Please refund the duplicate charge on this invoice") {
 		t.Error("IsEnglish() = false for English prose")
 	}
-	if IsEnglish("मुझसे दो बार शुल्क लिया गया") {
+	if IsEnglish("मुझे दो बार शुल्क लिया गया") {
 		t.Error("IsEnglish() = true for Devanagari")
 	}
 }

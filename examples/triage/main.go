@@ -36,6 +36,7 @@ type config struct {
 	url     string
 	device  string
 	model   string
+	minConf float64
 	verbose bool
 }
 
@@ -48,6 +49,7 @@ func main() {
 		"a Laya server to ask; default is $LAYA_URL, then a Python sidecar this process owns")
 	flag.StringVar(&cfg.device, "device", "", "cuda, cpu or mps; autodetected by default (sidecar only)")
 	flag.StringVar(&cfg.model, "model", "", "pin a checkpoint instead of routing: english, multilingual, typed-decisions")
+	flag.Float64Var(&cfg.minConf, "min-confidence", 0, "minimum calibrated confidence threshold for gating / abstention")
 	flag.BoolVar(&cfg.verbose, "v", false, "show what the interpreter prints while it loads (sidecar only)")
 	flag.Parse()
 
@@ -80,7 +82,12 @@ func run(cfg config) error {
 	fmt.Printf("runtime    : %s\n", runtime)
 	fmt.Printf("routing    : %s\n\n", laya.Route(state, nil, laya.RouteOptions{Model: cfg.model}))
 
-	resp, err := client.Ask(ctx, state, laya.TriageQuestions())
+	var callOpts []laya.CallOption
+	if cfg.minConf > 0 {
+		callOpts = append(callOpts, laya.UseMinConfidence(cfg.minConf))
+	}
+
+	resp, err := client.Ask(ctx, state, laya.TriageQuestions(), callOpts...)
 	if err != nil {
 		return err
 	}
@@ -97,23 +104,29 @@ func run(cfg config) error {
 	urgent := resp.Answers.MustNoul("is_urgent")
 
 	_, level := frustration.Nearest()
-	fmt.Printf("intent     : %s (%.2f confident, runners-up %v)\n", intent.Selected, intent.Conf, intent.Runners()[1:3])
-	fmt.Printf("frustration: %.2f, %s\n", frustration.Value, level)
-	fmt.Printf("urgent     : %.2f\n", urgent)
-	fmt.Printf("churn risk : %.2f\n", churn)
-	fmt.Printf("refund     : %.2f\n", resp.Answers.MustNoul("refund_requested"))
+	fmt.Printf("intent     : %s (%.2f calibrated conf, %.2f entropy, runners-up %v)\n",
+		intent.Selected, intent.AnswerConfidence(), intent.Conf, intent.Runners()[1:3])
+	if intent.LowConfidence {
+		fmt.Printf("             [ABSTAINED: low confidence, threshold=%.2f]\n", cfg.minConf)
+	}
+	fmt.Printf("frustration: %.2f, %s (conf: %.2f)\n", frustration.Value, level, frustration.AnswerConfidence())
+	fmt.Printf("urgent     : %.2f (conf: %.2f)\n", urgent, resp.Answers["is_urgent"].AnswerConfidence())
+	fmt.Printf("churn risk : %.2f (conf: %.2f)\n", churn, resp.Answers["churn_risk"].AnswerConfidence())
+	fmt.Printf("refund     : %.2f (conf: %.2f)\n", resp.Answers.MustNoul("refund_requested"), resp.Answers["refund_requested"].AnswerConfidence())
 	fmt.Printf("answered by: %s in %v (%d input tokens)\n\n",
 		resp.Checkpoint(), resp.Latency.Round(time.Millisecond), resp.Usage.InputTokens)
 
 	// The thresholds live here, not in the questions, so the policy can change
 	// without running inference again.
 	switch {
+	case intent.LowConfidence:
+		fmt.Println("action     : route to human queue due to low model confidence")
 	case churn >= 0.7 || frustration.Value >= 2.5:
 		fmt.Println("action     : escalate to a human now")
-	case intent.Selected == "refund" && intent.Conf >= 0.85:
+	case intent.Selected == "refund" && intent.AnswerConfidence() >= 0.85:
 		fmt.Println("action     : open a refund case automatically")
-	case intent.Conf < 0.6:
-		fmt.Printf("action     : queue for human triage (only %.2f confident)\n", intent.Conf)
+	case intent.AnswerConfidence() < 0.6:
+		fmt.Printf("action     : queue for human triage (only %.2f calibrated confidence)\n", intent.AnswerConfidence())
 	default:
 		fmt.Printf("action     : route to the %s queue\n", intent.Selected)
 	}

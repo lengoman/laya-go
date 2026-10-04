@@ -20,4 +20,5 @@ __pycache__/
 # Editors
 .DS_Store
 .vscode/
+.idea/
 *.iml
